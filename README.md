@@ -20,7 +20,3 @@ Harpy is an end-to-end affiliate marketing automation tool. It transforms your A
 | 📤 **Multi-Platform Publishing** | Posts to TikTok and Instagram via official APIs (or fallback to copy-paste mode). |
 | 🤖 **Human-in-the-Loop** | Previews every video and caption before posting – approve or reject with one keystroke. |
 | 📊 **Performance Analytics** | Tracks views, clicks, and conversions to refine future content automatically. |
-
----
-
-## 🔄 The Flywheel
