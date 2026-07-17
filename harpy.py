@@ -65,9 +65,13 @@ def cli(ctx: click.Context) -> None:
     "--script-only", is_flag=True,
     help="Run research + script generation (S1 + S2) and display results",
 )
+@click.option(
+    "--render-only", is_flag=True,
+    help="Run full pipeline (S1 + S2 + render) and output video",
+)
 def generate(
     niche: str, platforms: str, dry_run: bool,
-    research_only: bool, script_only: bool,
+    research_only: bool, script_only: bool, render_only: bool,
 ) -> None:
     """Generate content for a niche.
 
@@ -81,6 +85,8 @@ def generate(
         phase_label = "\n[bold]Phase:[/] [cyan]Research Only[/]"
     elif script_only:
         phase_label = "\n[bold]Phase:[/] [magenta]Research + Script[/]"
+    elif render_only:
+        phase_label = "\n[bold]Phase:[/] [yellow]Full Pipeline (Render)[/]"
 
     console.print(Panel.fit(
         f"[bold]Niche:[/] {niche}\n"
@@ -93,7 +99,7 @@ def generate(
 
     # --- S1: Research Phase ---
     research_result = None
-    if research_only or script_only or not dry_run:
+    if research_only or script_only or render_only or not dry_run:
         research_result = _run_research_phase(niche, dry_run)
 
     if research_only:
@@ -106,10 +112,23 @@ def generate(
         product_name = research_result.program.product_name or niche
         research_ctx = research_result.summary or ""
 
-    if script_only or not dry_run:
+    if script_only or render_only or not dry_run:
         _run_script_phase(niche, product_name, platform_list, research_ctx, dry_run)
 
     if script_only:
+        return
+
+    # --- S3: Render Phase ---
+    if render_only or not dry_run:
+        script_text = _get_last_script_text()
+        _run_render_phase(
+            niche=niche,
+            product_name=product_name,
+            script_text=script_text,
+            dry_run=dry_run,
+        )
+
+    if render_only:
         return
 
     # --- Full pipeline skeleton ---
@@ -253,6 +272,8 @@ def _run_script_phase(
         border_style="magenta",
     ))
 
+    _set_last_script_text(result.script_tiktok.script or result.script_instagram.script or "")
+
 
 def _display_script(script, platform: str) -> None:
     if not script or not script.script:
@@ -296,6 +317,93 @@ def _display_hashtags(hashtags) -> None:
     if hashtags.grouped:
         for group, tags in hashtags.grouped.items():
             console.print(f"  [dim]{group}:[/] {' '.join(tags)}")
+
+
+_last_script_text: str = ""
+
+
+def _get_last_script_text() -> str:
+    return _last_script_text
+
+
+def _set_last_script_text(text: str) -> None:
+    global _last_script_text
+    _last_script_text = text
+
+
+def _get_render_agent(dry_run: bool = False):
+    """Lazy-load the RenderAgent."""
+    from core.render import RenderAgent
+    from core.config import load_config
+    if dry_run:
+        config = load_config(require_api_key=False)
+    else:
+        config = load_config(require_api_key=True)
+    return RenderAgent(config)
+
+
+def _run_render_phase(
+    niche: str,
+    product_name: str,
+    script_text: str,
+    dry_run: bool,
+) -> None:
+    """Execute rendering pipeline and display result."""
+    with console.status(f"[yellow]Rendering video for '{product_name}'...[/]"):
+        try:
+            agent = _get_render_agent(dry_run=dry_run)
+            result = agent.render_video(
+                script_text=script_text,
+                niche=niche,
+                product_name=product_name,
+                output_dir=f"outputs/{niche.replace(' ', '_')}",
+            )
+        except Exception as e:
+            console.print(f"[red]Render failed: {e}[/]")
+            return
+
+    _display_render_result(result)
+
+
+def _display_render_result(result) -> None:
+    if not result:
+        console.print("[red]No render result.[/]")
+        return
+
+    table = Table(title="Render Output", border_style="yellow")
+    table.add_column("Component", style="bold yellow")
+    table.add_column("Status")
+
+    status = "[green]OK[/]" if result.success else "[red]FAILED[/]"
+    table.add_row("Overall", status)
+
+    if result.video:
+        v = result.video
+        table.add_row("Video", str(v.video_path))
+        table.add_row("Duration", f"{v.duration:.1f}s")
+        table.add_row("Resolution", f"{v.resolution[0]}x{v.resolution[1]}")
+        table.add_row("File Size", f"{v.file_size_mb:.1f} MB")
+        table.add_row("Clips Used", str(v.components.get("clips_count", "?")))
+        table.add_row("Captions", str(v.components.get("captions_count", "?")))
+
+    if result.voiceover_path:
+        table.add_row("Voiceover", f"[dim]{result.voiceover_path}[/]")
+    if result.clips_paths:
+        table.add_row("Stock Clips", str(len(result.clips_paths)))
+    if result.errors:
+        for err in result.errors:
+            table.add_row("Error", f"[red]{err[:80]}[/]")
+
+    console.print(table)
+
+    if result.success and result.video:
+        console.print(Panel.fit(
+            f"[bold]Video ready:[/] {result.video.video_path}\n"
+            f"[bold]Duration:[/] {result.video.duration:.1f}s\n"
+            f"Preview with: [dim]ffplay {result.video.video_path}[/]",
+            title="Render Complete",
+            border_style="yellow",
+        ))
 
 
 @cli.command()
