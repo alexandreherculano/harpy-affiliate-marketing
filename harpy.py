@@ -125,6 +125,7 @@ def generate(
             niche=niche,
             product_name=product_name,
             script_text=script_text,
+            platforms=platform_list,
             dry_run=dry_run,
         )
 
@@ -273,6 +274,7 @@ def _run_script_phase(
     ))
 
     _set_last_script_text(result.script_tiktok.script or result.script_instagram.script or "")
+    _set_last_script_result(result)
 
 
 def _display_script(script, platform: str) -> None:
@@ -320,15 +322,25 @@ def _display_hashtags(hashtags) -> None:
 
 
 _last_script_text: str = ""
+_last_script_result: object = None
 
 
 def _get_last_script_text() -> str:
     return _last_script_text
 
 
+def _get_last_script_result():
+    return _last_script_result
+
+
 def _set_last_script_text(text: str) -> None:
     global _last_script_text
     _last_script_text = text
+
+
+def _set_last_script_result(result) -> None:
+    global _last_script_result
+    _last_script_result = result
 
 
 def _get_render_agent(dry_run: bool = False):
@@ -346,9 +358,10 @@ def _run_render_phase(
     niche: str,
     product_name: str,
     script_text: str,
+    platforms: list[str],
     dry_run: bool,
 ) -> None:
-    """Execute rendering pipeline and display result."""
+    """Execute rendering pipeline and display result. Enqueues post on success."""
     with console.status(f"[yellow]Rendering video for '{product_name}'...[/]"):
         try:
             agent = _get_render_agent(dry_run=dry_run)
@@ -363,6 +376,69 @@ def _run_render_phase(
             return
 
     _display_render_result(result)
+
+    if result.success and result.video:
+        _enqueue_after_render(
+            niche=niche,
+            product_name=product_name,
+            video_path=result.video.video_path,
+            platforms=platforms,
+            render_meta={
+                "duration": result.video.duration,
+                "file_size_mb": result.video.file_size_mb,
+                "engine": result.video.components.get("engine", "unknown"),
+                "captions_count": result.video.components.get("captions_count", 0),
+            },
+        )
+
+
+def _enqueue_after_render(
+    niche: str,
+    product_name: str,
+    video_path: Path | str,
+    platforms: list[str],
+    render_meta: dict | None = None,
+) -> None:
+    """Save the rendered post to the approval queue."""
+    from core.post_queue import PostEntry, PostQueue
+
+    script_result = _get_last_script_result()
+    caption = ""
+    hashtags: list[str] = []
+
+    if script_result:
+        try:
+            caption = script_result.captions.primary or ""
+        except AttributeError:
+            pass
+        try:
+            hashtags = script_result.hashtags.tags or []
+        except AttributeError:
+            pass
+
+    entry = PostEntry(
+        niche=niche,
+        product=product_name,
+        video_path=str(video_path),
+        caption=caption,
+        hashtags=hashtags,
+        platforms=platforms,
+        render_metadata=render_meta or {},
+    )
+
+    queue = PostQueue()
+    queue.add(entry)
+
+    console.print(Panel.fit(
+        f"[bold green]Post enqueued![/]\n"
+        f"ID: {entry.id}\n"
+        f"Niche: {entry.niche}\n"
+        f"Video: {entry.video_path}\n"
+        f"Status: [yellow]{entry.status}[/]\n\n"
+        f"Review with: [bold]harpy preview[/]",
+        title="Approval Queue",
+        border_style="green",
+    ))
 
 
 def _display_render_result(result) -> None:
@@ -407,125 +483,373 @@ def _display_render_result(result) -> None:
 
 
 @cli.command()
-@click.argument("niche_slug", required=False)
-def preview(niche_slug: str | None) -> None:
-    """Preview generated content before publishing."""
-    if niche_slug:
-        console.print(Panel.fit(
-            f"Previewing content for [bold cyan]{niche_slug}[/]",
-            title="Content Preview",
-        ))
-    else:
-        console.print("[yellow]No niche specified. Usage: harpy preview <niche-slug>[/]")
+@click.argument("post_id", required=False)
+@click.option("--approve", "-a", "do_approve", is_flag=True, help="Approve the post (non-interactive)")
+@click.option("--reject", "-r", "do_reject", is_flag=True, help="Reject the post (non-interactive)")
+@click.option("--feedback", "-f", default="", help="Rejection feedback")
+def preview(post_id: str | None, do_approve: bool, do_reject: bool, feedback: str) -> None:
+    """Preview the most recent pending post and approve or reject it.
+
+    Without arguments, shows the latest pending video + caption
+    and asks interactively: Aprovar? (s/n)
+
+    Use --approve/--reject for non-interactive (scripted) mode.
+    """
+    from core.post_queue import PostQueue
+
+    queue = PostQueue()
+    posts = queue.load()
+
+    if not posts:
+        console.print("[dim]Queue is empty. Run: harpy generate --niche <name> --render-only[/]")
         return
 
-    sections = [
-        ("TikTok / Reels Script", "15-30s short-form video script"),
-        ("Instagram Feed Post", "Caption + hashtag strategy"),
-        ("Landing Page", "AIDA-framework HTML landing page"),
-        ("Bio Link Page", "Linktree-style bio link hub"),
-        ("30-Day Calendar", "Publishing schedule for TT + IG"),
-    ]
+    if post_id:
+        post = queue.get(post_id)
+        if not post:
+            console.print(f"[red]Post not found: {post_id}[/]")
+            return
+        if do_approve:
+            queue.approve(post_id)
+            console.print(f"[green]Post {post_id} approved![/]")
+            return
+        if do_reject:
+            queue.remove(post_id)
+            console.print(f"[yellow]Post {post_id} rejected and removed.[/]")
+            return
+        _display_post_detail(post)
+        return
 
-    for title, desc in sections:
-        console.print(f"\n[bold]{title}[/]")
-        console.print(f"  [dim]{desc}[/]")
-        console.print(f"  [dim]→ Content will be rendered here after generation.[/]")
+    pending = queue.pending()
+    if not pending:
+        console.print("[green]No pending posts![/]")
+        counts = queue.count_by_status()
+        if counts:
+            console.print(f"  Approved: {counts.get('approved', 0)} | Rejected: {counts.get('rejected', 0)} | Posted: {counts.get('posted', 0)}")
+        return
+
+    post = pending[0]
+
+    _display_post_preview(post)
+
+    if do_approve:
+        queue.approve(post.id)
+        console.print(f"\n[green]Post {post.id} approved![/]")
+        return
+    if do_reject:
+        queue.remove(post.id)
+        console.print(f"\n[yellow]Post {post.id} rejected and removed.[/]")
+        return
+
+    choice = click.prompt("\nAprovar? (s/n)", type=str, default="n").strip().lower()
+    if choice in ("s", "y", "sim", "yes"):
+        queue.approve(post.id)
+        console.print(f"[green]Post {post.id} approved![/]")
+        console.print(f"[dim]Publish with: harpy publish --post {post.id} --platform tiktok[/]")
+    else:
+        queue.remove(post.id)
+        console.print(f"[yellow]Post {post.id} rejected and removed from queue.[/]")
+
+
+def _display_post_preview(post) -> None:
+    """Show a compact post preview with video info, caption, and hashtags."""
+    console.print(Panel.fit(
+        f"[bold]ID:[/] {post.id} | [bold]Status:[/] [yellow]{post.status}[/]\n"
+        f"[bold]Niche:[/] {post.niche}\n"
+        f"[bold]Product:[/] {post.product}\n"
+        f"[bold]Video:[/] [dim]{post.video_path}[/]\n"
+        f"[bold]Platforms:[/] {', '.join(post.platforms)}\n"
+        f"[bold]Created:[/] {post.created_at[:16].replace('T', ' ')}",
+        title=f"Post Preview — {post.niche}",
+        border_style="cyan",
+    ))
+
+    if post.caption:
+        console.print(Panel.fit(
+            post.caption[:600],
+            title="Caption",
+            border_style="green",
+        ))
+
+    if post.hashtags:
+        console.print(Panel.fit(
+            " ".join(post.hashtags[:15]),
+            title="Hashtags",
+            border_style="blue",
+        ))
+
+    if post.render_metadata:
+        meta = post.render_metadata
+        console.print(
+            f"  [dim]Video: {meta.get('duration', '?')}s | "
+            f"{meta.get('file_size_mb', '?')} MB | "
+            f"Captions: {meta.get('captions_count', '?')} segments[/]"
+        )
+
+
+def _display_post_detail(post) -> None:
+    """Show full detail view (for non-interactive inspection)."""
+    from core.post_queue import PostQueue
+    import os
+
+    queue = PostQueue()
 
     console.print(Panel.fit(
+        f"[bold]ID:[/] {post.id}\n"
+        f"[bold]Status:[/] {post.status}\n"
+        f"[bold]Niche:[/] {post.niche}\n"
+        f"[bold]Product:[/] {post.product}\n"
+        f"[bold]Video:[/] {post.video_path}\n"
+        f"[bold]Platforms:[/] {', '.join(post.platforms)}\n"
+        f"[bold]Created:[/] {post.created_at}",
+        title="Post Detail",
+        border_style="blue",
+    ))
+
+    if post.caption:
+        console.print(Panel.fit(
+            post.caption[:500],
+            title="Caption",
+            border_style="green",
+        ))
+
+    if post.hashtags:
+        console.print(Panel.fit(
+            " ".join(post.hashtags[:20]),
+            title="Hashtags",
+            border_style="blue",
+        ))
+
+    if post.render_metadata:
+        meta = post.render_metadata
+        console.print(f"  [dim]Duration: {meta.get('duration', '?')}s | "
+                      f"Size: {meta.get('file_size_mb', '?')} MB | "
+                      f"Engine: {meta.get('engine', '?')} | "
+                      f"Captions: {meta.get('captions_count', '?')}[/]")
+
+    console.print()
+    console.print(Panel.fit(
         "[bold]Actions:[/]\n"
-        "  [y] approve    [/] → publish content\n"
-        "  [n] reject     [/] → regenerate with feedback\n"
-        "  [e] edit       [/] → refine manually",
-        title="Human-in-the-Loop",
-        border_style="green",
+        f"  [green]harpy preview {post.id} --approve[/]   → approve for publishing\n"
+        f"  [red]harpy preview {post.id} --reject[/]   → reject and remove\n"
+        f"  [yellow]harpy publish --post {post.id}[/]   → publish approved post",
+        title="Commands",
+        border_style="yellow",
     ))
 
 
 @cli.command()
 @click.option("--platform", "-p", default="tiktok", help="Target platform")
-@click.option("--niche", "-n", required=True, help="Niche slug to publish")
-@click.option("--dry-run", is_flag=True, help="Simulate without posting")
-def publish(platform: str, niche: str, dry_run: bool) -> None:
-    """Publish approved content to TikTok or Instagram."""
+@click.option("--post", "-P", "post_id", default="", help="Post ID from the queue (single)")
+@click.option("--dry-run", is_flag=True, help="Simulate without posting. Generates fallback .txt")
+def publish(platform: str, post_id: str, dry_run: bool) -> None:
+    """Publish ALL approved posts to TikTok or Instagram.
+
+    Without --post, publishes every approved post in the queue.
+    Always generates fallback .txt files for manual posting.
+    """
+    from core.post_queue import PostQueue
+    from core.publish import PublishAgent
+
     valid_platforms = ["tiktok", "instagram", "reels"]
+    if platform == "reels":
+        platform = "instagram"
     if platform not in valid_platforms:
-        console.print(f"[red]Invalid platform: {platform}. Use: {', '.join(valid_platforms)}[/]")
+        console.print(f"[red]Invalid platform: {platform}. Use: tiktok, instagram[/]")
         return
+
+    queue = PostQueue()
+    agent = PublishAgent()
+
+    if post_id:
+        post = queue.get(post_id)
+        if not post:
+            console.print(f"[red]Post not found: {post_id}[/]")
+            return
+        if post.status != "approved":
+            console.print(
+                f"[yellow]Post {post_id} is '{post.status}'. "
+                f"Approve it first: harpy preview[/]"
+            )
+            return
+        approved_posts = [post]
+    else:
+        approved_posts = queue.approved()
+        if not approved_posts:
+            console.print("[yellow]No approved posts. Approve with: harpy preview[/]")
+            return
 
     console.print(Panel.fit(
         f"[bold]Platform:[/] {platform}\n"
-        f"[bold]Niche:[/] {niche}\n"
+        f"[bold]Posts to publish:[/] {len(approved_posts)}\n"
         f"[bold]Mode:[/] {'[yellow]Dry Run[/]' if dry_run else '[green]Live[/]'}",
         title="Publishing Content",
         border_style="magenta",
     ))
 
-    if platform == "tiktok":
-        console.print("[dim]→ Posting video to TikTok via API...[/]")
-    elif platform == "instagram":
-        console.print("[dim]→ Posting Reel + Feed post to Instagram via API...[/]")
-    elif platform == "reels":
-        console.print("[dim]→ Posting Reels to Instagram + TikTok...[/]")
+    results = agent.publish_all_from_queue(platform=platform, dry_run=dry_run)
 
-    if dry_run:
-        console.print("[yellow]Dry run — nothing was posted.[/]")
-    else:
-        console.print("[yellow]Publish endpoint not yet connected. Use dry-run mode for now.[/]")
+    table = Table(title="Publish Results")
+    table.add_column("Post ID", style="dim")
+    table.add_column("Product", style="bold")
+    table.add_column("Status")
+    table.add_column("Fallback")
+
+    for r in results:
+        status_icon = "[green]OK[/]" if r.success else "[yellow]fallback[/]"
+        table.add_row(
+            r.post_id or "—",
+            r.video_path.split("/")[-1] if r.video_path else "—",
+            status_icon,
+            r.fallback_path.split("/")[-1] if r.fallback_path else "—",
+        )
+
+    console.print(table)
+
+    if results:
+        fallbacks = [r for r in results if r.fallback_path]
+        if fallbacks:
+            console.print(
+                f"\n[dim]{len(fallbacks)} fallback .txt file(s) generated. "
+                "Open for step-by-step manual posting instructions.[/]"
+            )
+            for r in fallbacks:
+                console.print(f"  [dim]→ {r.fallback_path}[/]")
 
 
 @cli.command()
-def status() -> None:
-    """Show pipeline status and active flywheels."""
+@click.option("--analytics", "-a", is_flag=True, help="Include performance analytics")
+def status(analytics: bool) -> None:
+    """Show queue status, flywheels, and optionally analytics."""
+    from core.post_queue import PostQueue
+
     console.print(Text("Harpy Pipeline Status", style="bold underline"))
 
+    # --- Post Queue ---
+    queue = PostQueue()
+    counts = queue.count_by_status()
+    total = sum(counts.values())
+
+    console.print()
+    console.print(Panel.fit(
+        f"Total posts: {total} | "
+        f"[yellow]Pending: {counts.get('pending', 0)}[/] | "
+        f"[green]Approved: {counts.get('approved', 0)}[/] | "
+        f"[red]Rejected: {counts.get('rejected', 0)}[/] | "
+        f"[dim]Posted: {counts.get('posted', 0)}[/]",
+        title="Post Queue",
+        border_style="blue",
+    ))
+
+    posts = queue.load()
+    if posts:
+        table = Table(title="Posts")
+        table.add_column("ID", style="dim")
+        table.add_column("Niche", style="cyan")
+        table.add_column("Product", style="bold")
+        table.add_column("Status")
+        table.add_column("Platforms")
+        table.add_column("Created")
+
+        for p in sorted(posts, key=lambda x: x.created_at, reverse=True):
+            status_color = {
+                "pending": "yellow",
+                "approved": "green",
+                "rejected": "red",
+                "posted": "dim",
+            }.get(p.status, "white")
+
+            table.add_row(
+                p.id,
+                p.niche,
+                p.product[:25] if p.product else "—",
+                f"[{status_color}]{p.status}[/]",
+                ", ".join(p.platforms),
+                p.created_at[:16].replace("T", " "),
+            )
+
+        console.print(table)
+    else:
+        console.print("  [dim]No posts yet. Run: harpy generate --niche <name> --render-only[/]")
+
+    # --- Analytics ---
+    if analytics and posts:
+        _display_analytics()
+
+    # --- Flywheels ---
     try:
         from core.config import load_config
         from core.queue import QueueManager
-        config = load_config()
+        config = load_config(require_api_key=False)
         qm = QueueManager(config.output_dir)
         flywheels = qm.load_all()
     except Exception:
         flywheels = []
 
-    if not flywheels:
-        table = Table(title="Flywheels")
-        table.add_column("Niche", style="cyan")
-        table.add_column("Status", style="green")
-        table.add_column("Stage", style="yellow")
-        table.add_column("Iteration", justify="right")
-        table.add_column("Platforms")
-        table.add_row(
-            "No flywheels yet",
-            "[dim]—[/]",
-            "—",
-            "—",
-            "—",
-        )
-        console.print(table)
-        console.print("\n[dim]Run [bold]harpy generate --niche <name>[/] to start.[/]")
-        return
+    if flywheels:
+        console.print()
+        ftable = Table(title="Flywheels")
+        ftable.add_column("Niche", style="cyan")
+        ftable.add_column("Status", style="green")
+        ftable.add_column("Stage", style="yellow")
+        ftable.add_column("Iteration", justify="right")
+        ftable.add_column("Platforms")
 
-    table = Table(title="Flywheels")
-    table.add_column("Niche", style="cyan")
-    table.add_column("Status", style="green")
-    table.add_column("Stage", style="yellow")
-    table.add_column("Iteration", justify="right")
-    table.add_column("Platforms")
+        for fw in flywheels:
+            status_color = "green" if fw.status == "active" else "dim"
+            stage = fw.current_stage or "complete"
+            ftable.add_row(
+                fw.niche,
+                f"[{status_color}]{fw.status}[/]",
+                stage,
+                str(fw.iteration),
+                ", ".join(fw.target_platforms),
+            )
 
-    for fw in flywheels:
-        status_color = "green" if fw.status == "active" else "dim"
-        stage = fw.current_stage or "complete"
-        table.add_row(
-            fw.niche,
-            f"[{status_color}]{fw.status}[/]",
-            stage,
-            str(fw.iteration),
-            ", ".join(fw.target_platforms),
-        )
+        console.print(ftable)
 
-    console.print(table)
-    console.print("\n[dim]Run [bold]harpy generate --niche <name>[/] to start a new flywheel.[/]")
+    if not posts and not flywheels:
+        console.print("\n[dim]Run [bold]harpy generate --niche <name> --render-only[/] to start.[/]")
+
+
+def _display_analytics() -> None:
+    """Fetch and display analytics from the AnalyticsAgent."""
+    try:
+        from core.analytics import AnalyticsAgent
+        agent = AnalyticsAgent()
+        report = agent.generate_report()
+
+        console.print()
+        if report.metrics:
+            m = report.metrics
+            console.print(Panel.fit(
+                f"[bold]{m.platform.upper()}[/]: {m.views:,} views, "
+                f"{m.likes} likes, {m.comments} comments, "
+                f"{m.shares} shares\n"
+                f"Engagement rate: {m.engagement_rate:.1f}% | "
+                f"Clicks: {m.click_through}\n"
+                f"[dim]Data: {m.fetched_at}[/]",
+                title="Analytics (simulated)",
+                border_style="green",
+            ))
+
+        if report.suggestions:
+            s_table = Table(title="Improvement Suggestions")
+            s_table.add_column("Priority", style="bold")
+            s_table.add_column("Category", style="cyan")
+            s_table.add_column("Suggestion")
+
+            for s in report.suggestions[:5]:
+                sev_color = {"high": "red", "medium": "yellow", "low": "dim"}.get(s.severity, "white")
+                s_table.add_row(
+                    f"[{sev_color}]{s.severity.upper()}[/]",
+                    s.category,
+                    s.suggestion[:100],
+                )
+
+            console.print(s_table)
+    except Exception as e:
+        console.print(f"[dim]Analytics unavailable: {e}[/]")
 
 
 def main() -> None:
