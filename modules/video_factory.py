@@ -76,6 +76,7 @@ class VideoFactory:
         captions: list[dict] | None = None,
         output_path: str | Path | None = None,
         add_watermark: bool = True,
+        language: str = "pt",
     ) -> VideoOutput:
         output = Path(output_path) if output_path else Path(tempfile.gettempdir()) / "harpy_video" / "output.mp4"
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +84,7 @@ class VideoFactory:
         if self._engine == "moviepy":
             return self._compose_moviepy(script_text, clips, audio_path, captions, output, add_watermark)
         if self._engine == "imageio":
-            return self._compose_imageio(script_text, clips, audio_path, captions, output, add_watermark)
+            return self._compose_imageio(script_text, clips, audio_path, captions, output, add_watermark, language)
 
         return self._compose_placeholder(output)
 
@@ -95,6 +96,7 @@ class VideoFactory:
         captions: list[dict] | None,
         output: Path,
         add_watermark: bool,
+        language: str = "pt",
     ) -> VideoOutput:
         """Create video using imageio + numpy + Pillow — no external ffmpeg needed."""
         import imageio
@@ -179,7 +181,7 @@ class VideoFactory:
                         )
                     except Exception:
                         small_font = font
-                    wm_text = "Made with Harpy"
+                    wm_text = "Feito com Harpy" if language.startswith("pt") else "Made with Harpy"
                     draw.text((w - 180, h - 50), wm_text, font=small_font, fill=(200, 200, 200, 128))
 
                 writer.append_data(np.array(img))

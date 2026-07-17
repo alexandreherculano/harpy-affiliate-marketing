@@ -49,7 +49,7 @@ class RenderAgent:
         product_name: str = "",
         output_dir: str | None = None,
         search_queries: list[str] | None = None,
-        voice_language: str = "en",
+        voice_language: str = "pt",
     ) -> RenderResult:
         """Render a complete video from a script.
 
@@ -158,14 +158,15 @@ class RenderAgent:
         return [q for q in queries if q.strip()]
 
     def _prepare_voice_text(self, script_text: str, hook: str) -> str:
-        """Clean script text for TTS — remove visual directions."""
+        """Clean script text for TTS — remove visual directions but preserve accents."""
         import re
 
         text = re.sub(r'【.*?】', '', script_text)
         text = re.sub(r'\[.*?\]', '', text)
+        text = re.sub(r'\bVOZ:\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bVoz:\s*', '', text)
         text = re.sub(r'\bVOICE:\s*', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\bVoice:\s*', '', text)
-        text = re.sub(r'[🎬📹📱🔥💡👉👇👆🔥🚨]', '', text)
 
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         clean = " ".join(lines)
