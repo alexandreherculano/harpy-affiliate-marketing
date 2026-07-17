@@ -61,7 +61,14 @@ def cli(ctx: click.Context) -> None:
     "--research-only", is_flag=True,
     help="Run only the research phase (S1) and display results",
 )
-def generate(niche: str, platforms: str, dry_run: bool, research_only: bool) -> None:
+@click.option(
+    "--script-only", is_flag=True,
+    help="Run research + script generation (S1 + S2) and display results",
+)
+def generate(
+    niche: str, platforms: str, dry_run: bool,
+    research_only: bool, script_only: bool,
+) -> None:
     """Generate content for a niche.
 
     Runs the full flywheel pipeline:
@@ -69,20 +76,40 @@ def generate(niche: str, platforms: str, dry_run: bool, research_only: bool) -> 
     """
     platform_list = [p.strip() for p in platforms.split(",") if p.strip()]
 
+    phase_label = ""
+    if research_only:
+        phase_label = "\n[bold]Phase:[/] [cyan]Research Only[/]"
+    elif script_only:
+        phase_label = "\n[bold]Phase:[/] [magenta]Research + Script[/]"
+
     console.print(Panel.fit(
         f"[bold]Niche:[/] {niche}\n"
         f"[bold]Platforms:[/] {', '.join(platform_list)}\n"
         f"[bold]Mode:[/] {'[yellow]Dry Run[/]' if dry_run else '[green]Live[/]'}"
-        + (f"\n[bold]Phase:[/] [cyan]Research Only[/]" if research_only else ""),
+        + phase_label,
         title="Generating Content",
         border_style="cyan",
     ))
 
     # --- S1: Research Phase ---
-    if research_only or (not dry_run):
-        _run_research_phase(niche, dry_run)
+    research_result = None
+    if research_only or script_only or not dry_run:
+        research_result = _run_research_phase(niche, dry_run)
 
     if research_only:
+        return
+
+    # --- S2: Script Phase ---
+    product_name = niche
+    research_ctx = ""
+    if research_result and research_result.program:
+        product_name = research_result.program.product_name or niche
+        research_ctx = research_result.summary or ""
+
+    if script_only or not dry_run:
+        _run_script_phase(niche, product_name, platform_list, research_ctx, dry_run)
+
+    if script_only:
         return
 
     # --- Full pipeline skeleton ---
@@ -111,15 +138,15 @@ def generate(niche: str, platforms: str, dry_run: bool, research_only: bool) -> 
         console.print("\n[yellow]Full pipeline will be implemented in next rounds.[/]")
 
 
-def _run_research_phase(niche: str, dry_run: bool) -> None:
-    """Execute S1 research and display results."""
+def _run_research_phase(niche: str, dry_run: bool):
+    """Execute S1 research and display results. Returns the research output."""
     with console.status(f"[cyan]Researching '{niche}'...[/]"):
         try:
             agent = _get_research_agent(dry_run=dry_run)
             result = agent.run_full_research(niche, dry_run=dry_run)
         except Exception as e:
             console.print(f"[red]Research failed: {e}[/]")
-            return
+            return None
 
     _display_trends(result.trends)
     console.print()
@@ -132,6 +159,7 @@ def _run_research_phase(niche: str, dry_run: bool) -> None:
         title="Research Summary",
         border_style="cyan",
     ))
+    return result
 
 
 def _display_trends(trends) -> None:
@@ -176,6 +204,98 @@ def _display_traffic(traffic) -> None:
     table.add_row("Score", f"{traffic.score}/100")
     table.add_row("Verdict", traffic.verdict or "—")
     console.print(table)
+
+
+def _get_script_agent(dry_run: bool = False):
+    """Lazy-load the ScriptAgent."""
+    from core.script import ScriptAgent
+    from core.config import load_config
+    if dry_run:
+        config = load_config(require_api_key=False)
+    else:
+        config = load_config(require_api_key=True)
+    return ScriptAgent(config)
+
+
+def _run_script_phase(
+    niche: str, product_name: str,
+    platforms: list[str], research_ctx: str,
+    dry_run: bool,
+) -> None:
+    """Execute S2 script generation and display results."""
+    with console.status(f"[magenta]Writing scripts for '{product_name}'...[/]"):
+        try:
+            agent = _get_script_agent(dry_run=dry_run)
+            result = agent.run_full_script(
+                product_name=product_name,
+                niche=niche,
+                platforms=platforms,
+                research_context=research_ctx,
+                dry_run=dry_run,
+            )
+        except Exception as e:
+            console.print(f"[red]Script generation failed: {e}[/]")
+            return
+
+    console.print()
+    _display_script(result.script_tiktok, "TikTok")
+    if result.script_instagram.script:
+        console.print()
+        _display_script(result.script_instagram, "Instagram Reels")
+    console.print()
+    _display_captions(result.captions)
+    console.print()
+    _display_hashtags(result.hashtags)
+
+    console.print(Panel.fit(
+        result.summary,
+        title="Script Summary",
+        border_style="magenta",
+    ))
+
+
+def _display_script(script, platform: str) -> None:
+    if not script or not script.script:
+        return
+    lines = script.script.strip().split("\n")
+    shortened = "\n".join(lines[:50])
+    if len(lines) > 50:
+        shortened += f"\n... ({len(lines) - 50} more lines)"
+
+    console.print(Panel.fit(
+        f"[bold]Hook:[/] {script.hook}\n"
+        f"[bold]Duration:[/] {script.duration}\n"
+        f"[bold]CTA:[/] {script.cta}\n\n"
+        f"{shortened}",
+        title=f"Script — {platform}",
+        border_style="magenta",
+    ))
+
+
+def _display_captions(captions) -> None:
+    if not captions or not captions.primary:
+        return
+    table = Table(title="Captions", border_style="green")
+    table.add_column("Type", style="bold green")
+    table.add_column("Text")
+    table.add_row("[bold]Primary[/]", captions.primary[:300])
+    for i, alt in enumerate(captions.alternatives[:3]):
+        table.add_row(f"Alt #{i + 1}", alt[:300])
+    console.print(table)
+
+
+def _display_hashtags(hashtags) -> None:
+    if not hashtags or not hashtags.tags:
+        return
+    tag_str = " ".join(hashtags.tags[:20])
+    console.print(Panel.fit(
+        tag_str,
+        title="Hashtags",
+        border_style="blue",
+    ))
+    if hashtags.grouped:
+        for group, tags in hashtags.grouped.items():
+            console.print(f"  [dim]{group}:[/] {' '.join(tags)}")
 
 
 @cli.command()
