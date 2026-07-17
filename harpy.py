@@ -69,9 +69,15 @@ def cli(ctx: click.Context) -> None:
     "--render-only", is_flag=True,
     help="Run full pipeline (S1 + S2 + render) and output video",
 )
+@click.option(
+    "--language", "-l",
+    default="pt",
+    help="Output language (pt=en, etc.)",
+)
 def generate(
     niche: str, platforms: str, dry_run: bool,
     research_only: bool, script_only: bool, render_only: bool,
+    language: str,
 ) -> None:
     """Generate content for a niche.
 
@@ -100,7 +106,7 @@ def generate(
     # --- S1: Research Phase ---
     research_result = None
     if research_only or script_only or render_only or not dry_run:
-        research_result = _run_research_phase(niche, dry_run)
+        research_result = _run_research_phase(niche, dry_run, language)
 
     if research_only:
         return
@@ -113,7 +119,7 @@ def generate(
         research_ctx = research_result.summary or ""
 
     if script_only or render_only or not dry_run:
-        _run_script_phase(niche, product_name, platform_list, research_ctx, dry_run)
+        _run_script_phase(niche, product_name, platform_list, research_ctx, dry_run, language)
 
     if script_only:
         return
@@ -127,6 +133,7 @@ def generate(
             script_text=script_text,
             platforms=platform_list,
             dry_run=dry_run,
+            language=language,
         )
 
     if render_only:
@@ -158,12 +165,12 @@ def generate(
         console.print("\n[yellow]Full pipeline will be implemented in next rounds.[/]")
 
 
-def _run_research_phase(niche: str, dry_run: bool):
+def _run_research_phase(niche: str, dry_run: bool, language: str = "pt"):
     """Execute S1 research and display results. Returns the research output."""
     with console.status(f"[cyan]Researching '{niche}'...[/]"):
         try:
             agent = _get_research_agent(dry_run=dry_run)
-            result = agent.run_full_research(niche, dry_run=dry_run)
+            result = agent.run_full_research(niche, dry_run=dry_run, language=language)
         except Exception as e:
             console.print(f"[red]Research failed: {e}[/]")
             return None
@@ -240,7 +247,7 @@ def _get_script_agent(dry_run: bool = False):
 def _run_script_phase(
     niche: str, product_name: str,
     platforms: list[str], research_ctx: str,
-    dry_run: bool,
+    dry_run: bool, language: str = "pt",
 ) -> None:
     """Execute S2 script generation and display results."""
     with console.status(f"[magenta]Writing scripts for '{product_name}'...[/]"):
@@ -252,6 +259,7 @@ def _run_script_phase(
                 platforms=platforms,
                 research_context=research_ctx,
                 dry_run=dry_run,
+                language=language,
             )
         except Exception as e:
             console.print(f"[red]Script generation failed: {e}[/]")
@@ -360,6 +368,7 @@ def _run_render_phase(
     script_text: str,
     platforms: list[str],
     dry_run: bool,
+    language: str = "pt",
 ) -> None:
     """Execute rendering pipeline and display result. Enqueues post on success."""
     with console.status(f"[yellow]Rendering video for '{product_name}'...[/]"):
@@ -370,6 +379,7 @@ def _run_render_phase(
                 niche=niche,
                 product_name=product_name,
                 output_dir=f"outputs/{niche.replace(' ', '_')}",
+                voice_language=language,
             )
         except Exception as e:
             console.print(f"[red]Render failed: {e}[/]")

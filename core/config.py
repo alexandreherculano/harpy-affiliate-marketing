@@ -15,6 +15,8 @@ class Config(BaseSettings):
     deepseek_max_tokens: int = 4096
     deepseek_temperature: float = 0.7
 
+    harpy_language: str = "en"
+
     output_dir: str = "outputs/flywheels"
     log_dir: str = "logs"
     skills_dir: str = "skills/affiliate-skills"

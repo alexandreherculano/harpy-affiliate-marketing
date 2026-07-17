@@ -25,7 +25,7 @@ class VoiceoverResult:
     audio_path: Path
     duration: float
     provider: str = "gtts"
-    language: str = "en"
+    language: str = "pt"
 
 
 class VoiceoverEngine:
@@ -38,7 +38,7 @@ class VoiceoverEngine:
     def generate_voiceover(
         self,
         text: str,
-        language: str = "en",
+        language: str = "pt",
         output_dir: str | None = None,
         voice: str = "default",
     ) -> VoiceoverResult:
@@ -54,7 +54,7 @@ class VoiceoverEngine:
     def _gtts_tts(
         self,
         text: str,
-        language: str = "en",
+        language: str = "pt",
         output_dir: str | None = None,
     ) -> VoiceoverResult:
         if not GTTS_AVAILABLE:
@@ -65,7 +65,8 @@ class VoiceoverEngine:
         dest = Path(output_dir) if output_dir else Path(tempfile.gettempdir()) / "harpy_voice"
         dest.mkdir(parents=True, exist_ok=True)
 
-        tts = gTTS(text=text, lang=language, slow=False)
+        lang_code = "pt" if language.startswith("pt") else (language or "en")
+        tts = gTTS(text=text, lang=lang_code, slow=False)
         audio_path = dest / f"voiceover_{hash(text) % 100000}.mp3"
         tts.save(str(audio_path))
 
@@ -87,7 +88,7 @@ class VoiceoverEngine:
     def _elevenlabs_tts(
         self,
         text: str,
-        language: str = "en",
+        language: str = "pt",
         output_dir: str | None = None,
         voice: str = "default",
     ) -> VoiceoverResult:

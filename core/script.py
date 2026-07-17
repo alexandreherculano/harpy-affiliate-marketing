@@ -67,6 +67,7 @@ class ScriptAgent:
         platforms: list[str] | None = None,
         research_context: str = "",
         dry_run: bool = False,
+        language: str = "en",
     ) -> dict[str, ScriptOutput]:
         """Generate short-form video scripts for each target platform.
 
@@ -80,37 +81,65 @@ class ScriptAgent:
             raise RuntimeError("Skill 'tiktok-script-writer' not found.")
 
         results: dict[str, ScriptOutput] = {}
+        is_pt = language.startswith("pt")
 
         for platform in platforms:
             if dry_run:
-                results[platform] = self._mock_script(niche, product_name, platform)
+                results[platform] = self._mock_script(niche, product_name, platform, language)
                 continue
 
-            prompt = (
-                f"Write a short-form video script for **{platform.upper()}** "
-                f"(also compatible with {'Instagram Reels' if platform == 'tiktok' else 'TikTok'}).\n\n"
-                f"**Product:** {product_name}\n"
-                f"**Niche:** {niche}\n"
-                f"**Target format:** 9:16 vertical, 15-60 seconds\n"
-            )
-            if research_context:
-                prompt += f"\n**Research data:**\n{research_context}\n"
+            if is_pt:
+                prompt = (
+                    f"Escreva um roteiro de vídeo curto para **{platform.upper()}** "
+                    f"(compatível com {'Instagram Reels' if platform == 'tiktok' else 'TikTok'}).\n\n"
+                    f"**Produto:** {product_name}\n"
+                    f"**Nicho:** {niche}\n"
+                    f"**Formato:** 9:16 vertical, 15-60 segundos\n"
+                )
+                if research_context:
+                    prompt += f"\n**Dados da pesquisa:**\n{research_context}\n"
 
-            prompt += (
-                f"\nCreate a script with these sections clearly labeled:\n"
-                f"1. **HOOK** (first 3 seconds — stop the scroll)\n"
-                f"2. **PROBLEM** (what pain point does {product_name} solve)\n"
-                f"3. **DEMO** (show the product in action, key benefit)\n"
-                f"4. **RESULT** (transformation or outcome)\n"
-                f"5. **CTA** (call to action — check bio, link below, etc.)\n\n"
-                f"Include:\n"
-                f"- Visual directions [in brackets]\n"
-                f"- Estimated timing per section\n"
-                f"- Platform-specific best practices for {platform}\n\n"
-                f"After your script, output a JSON block:\n"
-                f'{{"title": "...", "hook": "...", "duration": "...", "cta": "...", '
-                f'"script": "full script text"}}'
-            )
+                prompt += (
+                    f"\nCrie um roteiro com estas seções:\n"
+                    f"1. **GANCHO** (3 primeiros segundos — pare o scroll)\n"
+                    f"2. **PROBLEMA** (qual dor {product_name} resolve)\n"
+                    f"3. **DEMONSTRAÇÃO** (mostre o produto em ação)\n"
+                    f"4. **RESULTADO** (transformação ou benefício)\n"
+                    f"5. **CTA** (chamada para ação — link na bio, etc.)\n\n"
+                    f"Inclua:\n"
+                    f"- Direções visuais [entre colchetes]\n"
+                    f"- Tempo estimado por seção\n"
+                    f"- Boas práticas para {platform}\n\n"
+                    f"Responda em português brasileiro. Após o roteiro, gere um bloco JSON:\n"
+                    f'{{"title": "...", "hook": "...", "duration": "...", "cta": "...", '
+                    f'"script": "texto completo do roteiro"}}'
+                )
+            else:
+                prompt = (
+                    f"Write a short-form video script for **{platform.upper()}** "
+                    f"(also compatible with {'Instagram Reels' if platform == 'tiktok' else 'TikTok'}).\n\n"
+                    f"**Product:** {product_name}\n"
+                    f"**Niche:** {niche}\n"
+                    f"**Target format:** 9:16 vertical, 15-60 seconds\n"
+                )
+                if research_context:
+                    prompt += f"\n**Research data:**\n{research_context}\n"
+
+                prompt += (
+                    f"\nCreate a script with these sections clearly labeled:\n"
+                    f"1. **HOOK** (first 3 seconds — stop the scroll)\n"
+                    f"2. **PROBLEM** (what pain point does {product_name} solve)\n"
+                    f"3. **DEMO** (show the product in action, key benefit)\n"
+                    f"4. **RESULT** (transformation or outcome)\n"
+                    f"5. **CTA** (call to action — check bio, link below, etc.)\n\n"
+                    f"Include:\n"
+                    f"- Visual directions [in brackets]\n"
+                    f"- Estimated timing per section\n"
+                    f"- Platform-specific best practices for {platform}\n\n"
+                    f"After your script, output a JSON block:\n"
+                    f'{{"title": "...", "hook": "...", "duration": "...", "cta": "...", '
+                    f'"script": "full script text"}}'
+                )
 
             raw = self._call_skill(skill, prompt)
             parsed = self._parse_json(raw)
@@ -132,6 +161,7 @@ class ScriptAgent:
         script_text: str = "",
         niche: str = "",
         dry_run: bool = False,
+        language: str = "en",
     ) -> CaptionOutput:
         """Generate Instagram/TikTok caption options using viral-post-writer.
 
@@ -142,24 +172,43 @@ class ScriptAgent:
             raise RuntimeError("Skill 'viral-post-writer' not found.")
 
         if dry_run:
-            return self._mock_captions(product_name)
+            return self._mock_captions(product_name, language)
 
-        prompt = (
-            f"Write 3 Instagram/TikTok caption options for a video promoting **{product_name}**.\n\n"
-            f"Niche: {niche}\n"
-        )
+        is_pt = language.startswith("pt")
+
+        if is_pt:
+            prompt = (
+                f"Escreva 3 opções de legenda para Instagram/TikTok promovendo **{product_name}**.\n\n"
+                f"Nicho: {niche}\n"
+            )
+        else:
+            prompt = (
+                f"Write 3 Instagram/TikTok caption options for a video promoting **{product_name}**.\n\n"
+                f"Niche: {niche}\n"
+            )
         if script_text:
-            prompt += f"Video script context:\n```\n{script_text[:1000]}\n```\n\n"
+            prompt += f"Contexto do roteiro:\n```\n{script_text[:1000]}\n```\n\n"
 
-        prompt += (
-            "Generate:\n"
-            "1. **Primary caption** — optimized with emojis, line breaks, and a soft CTA\n"
-            "2. **Alternative A** — shorter, punchy, question-based hook\n"
-            "3. **Alternative B** — story-driven, longer form with value teaching\n\n"
-            "Include FTC-compliant affiliate disclosure in each caption.\n\n"
-            "After your captions, output a JSON block:\n"
-            '{"primary": "...", "alternatives": ["...", "..."]}'
-        )
+        if is_pt:
+            prompt += (
+                "Gere:\n"
+                "1. **Legenda principal** — otimizada com emojis, quebras de linha e CTA suave\n"
+                "2. **Alternativa A** — mais curta, com pergunta impactante\n"
+                "3. **Alternativa B** — formato história, mais longa com valor educativo\n\n"
+                "Inclua divulgação de afiliado (FTC) em cada legenda.\n\n"
+                "Responda em português brasileiro. Após as legendas, gere um bloco JSON:\n"
+                '{"primary": "...", "alternatives": ["...", "..."]}'
+            )
+        else:
+            prompt += (
+                "Generate:\n"
+                "1. **Primary caption** — optimized with emojis, line breaks, and a soft CTA\n"
+                "2. **Alternative A** — shorter, punchy, question-based hook\n"
+                "3. **Alternative B** — story-driven, longer form with value teaching\n\n"
+                "Include FTC-compliant affiliate disclosure in each caption.\n\n"
+                "After your captions, output a JSON block:\n"
+                '{"primary": "...", "alternatives": ["...", "..."]}'
+            )
 
         raw = self._call_skill(skill, prompt)
         parsed = self._parse_json(raw)
@@ -176,34 +225,58 @@ class ScriptAgent:
         niche: str = "",
         platform: str = "tiktok",
         dry_run: bool = False,
+        language: str = "en",
     ) -> HashtagOutput:
         """Generate optimized hashtag sets for TikTok and Instagram.
 
         No specific skill slug — uses prompt engineering with DeepSeek directly.
         """
         if dry_run:
-            return self._mock_hashtags(topic, platform)
+            return self._mock_hashtags(topic, platform, language)
 
-        prompt = (
-            f"Generate an optimized hashtag strategy for a **{platform.upper()}** post "
-            f"about **{topic}**.\n\n"
-            f"Niche: {niche}\n\n"
-            "Generate hashtags grouped by category:\n"
-            "1. **BROAD** — 3-5 large tags (1M+ posts) for reach\n"
-            "2. **NICHE** — 5-8 medium tags (50K-500K) for targeted discovery\n"
-            "3. **SPECIFIC** — 3-5 small tags (<50K) for algorithm loyalty\n\n"
-            f"Total: 12-18 hashtags optimized for {platform}.\n\n"
-            "After your tags, output a JSON block:\n"
-            '{"tags": ["..."], "grouped": {"broad": ["..."], "niche": ["..."], "specific": ["..."]}}'
-        )
+        is_pt = language.startswith("pt")
 
-        response = self.client.chat(
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt=(
+        if is_pt:
+            prompt = (
+                f"Gere uma estratégia de hashtags para um post no **{platform.upper()}** "
+                f"sobre **{topic}**.\n\n"
+                f"Nicho: {niche}\n\n"
+                "Gere hashtags agrupadas por categoria:\n"
+                "1. **AMPLAS** — 3-5 tags grandes (1M+ posts) para alcance\n"
+                "2. **NICHO** — 5-8 tags médias (50K-500K) para descoberta\n"
+                "3. **ESPECÍFICAS** — 3-5 tags pequenas (<50K) para fidelidade do algoritmo\n\n"
+                f"Total: 12-18 hashtags otimizadas para {platform}.\n"
+                "Responda em português brasileiro.\n\n"
+                "Após as tags, gere um bloco JSON:\n"
+                '{"tags": ["..."], "grouped": {"broad": ["..."], "niche": ["..."], "specific": ["..."]}}'
+            )
+            system_prompt = (
+                "Você é um estrategista de hashtags para marketing de afiliados. "
+                "Gere hashtags otimizadas para cada plataforma que maximizem alcance "
+                "e descoberta. Responda em português brasileiro com JSON estruturado."
+            )
+        else:
+            prompt = (
+                f"Generate an optimized hashtag strategy for a **{platform.upper()}** post "
+                f"about **{topic}**.\n\n"
+                f"Niche: {niche}\n\n"
+                "Generate hashtags grouped by category:\n"
+                "1. **BROAD** — 3-5 large tags (1M+ posts) for reach\n"
+                "2. **NICHE** — 5-8 medium tags (50K-500K) for targeted discovery\n"
+                "3. **SPECIFIC** — 3-5 small tags (<50K) for algorithm loyalty\n\n"
+                f"Total: 12-18 hashtags optimized for {platform}.\n\n"
+                "After your tags, output a JSON block:\n"
+                '{"tags": ["..."], "grouped": {"broad": ["..."], "niche": ["..."], "specific": ["..."]}}'
+            )
+            system_prompt = (
                 "You are a hashtag strategist for social media affiliate marketing. "
                 "Generate optimized, platform-specific hashtag sets that maximize reach "
                 "and discovery. Output clean, structured JSON."
-            ),
+            )
+
+        response = self.client.chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=system_prompt,
         )
 
         parsed = self._parse_json(response.content)
@@ -221,16 +294,18 @@ class ScriptAgent:
         platforms: list[str] | None = None,
         research_context: str = "",
         dry_run: bool = False,
+        language: str = "en",
     ) -> ScriptResult:
         """Run all script generation steps and return consolidated output."""
         if platforms is None:
             platforms = ["tiktok", "instagram"]
 
         logger.info(
-            "ScriptAgent starting — product=%s niche=%s dry_run=%s",
+            "ScriptAgent starting — product=%s niche=%s dry_run=%s lang=%s",
             product_name,
             niche,
             dry_run,
+            language,
         )
 
         scripts = self.generate_script(
@@ -239,6 +314,7 @@ class ScriptAgent:
             platforms=platforms,
             research_context=research_context,
             dry_run=dry_run,
+            language=language,
         )
 
         tiktok_script = scripts.get("tiktok", ScriptOutput())
@@ -249,6 +325,7 @@ class ScriptAgent:
             script_text=combined_text,
             niche=niche,
             dry_run=dry_run,
+            language=language,
         )
 
         hashtags = self.generate_hashtags(
@@ -256,12 +333,13 @@ class ScriptAgent:
             niche=niche,
             platform=platforms[0],
             dry_run=dry_run,
+            language=language,
         )
 
         summary_lines = [
             f"Scripts generated for {len(scripts)} platform(s): {', '.join(scripts.keys())}.",
         ]
-        if tiktok_script.hook:
+        if platforms[0] and tiktok_script.hook:
             summary_lines.append(f"TikTok hook: \"{tiktok_script.hook}\"")
         if captions.primary:
             first_line = captions.primary.split("\n")[0][:100]
@@ -306,11 +384,39 @@ class ScriptAgent:
         return {}
 
     def _mock_script(
-        self, niche: str, product: str, platform: str
+        self, niche: str, product: str, platform: str, language: str = "en"
     ) -> ScriptOutput:
         platform_name = {"tiktok": "TikTok", "instagram": "Instagram Reels"}.get(
             platform, platform
         )
+        is_pt = language.startswith("pt")
+
+        if is_pt:
+            return ScriptOutput(
+                title=f"Review {product} — {platform_name}",
+                hook=f"Pare de comprar produtos de {niche} que não funcionam. Eu achei O certo.",
+                script=(
+                    f"[GANCHO — 0-3s]\n"
+                    f"🎬 【Texto: \"Pare de gastar dinheiro com {niche}\"】\n"
+                    f"Voz: \"Testei 5 produtos de {niche}. Só UM entregou resultado.\"\n\n"
+                    f"[PROBLEMA — 3-10s]\n"
+                    f"【B-roll de usuário frustrado com produtos concorrentes】\n"
+                    f"Voz: \"A maioria dos produtos de {niche} promete e não entrega.\"\n\n"
+                    f"[DEMONSTRAÇÃO — 10-25s]\n"
+                    f"【Gravação de tela do {product} em ação】\n"
+                    f"Voz: \"Aí eu encontrei {product}. Olha o que aconteceu...\"\n\n"
+                    f"[RESULTADO — 25-35s]\n"
+                    f"【Tela dividida Antes/Depois】\n"
+                    f"Voz: \"Em apenas 7 dias, tudo mudou.\"\n\n"
+                    f"[CTA — 35-40s]\n"
+                    f"【Apontar para baixo/comentários/bio】\n"
+                    f"Voz: \"Link na bio pra garantir o seu {product}. De nada.\""
+                ),
+                duration="40s",
+                cta="Link na bio pra garantir o seu!",
+                raw="[DRY RUN] Roteiro simulado — sem chamada de API.",
+            )
+
         return ScriptOutput(
             title=f"{product} Review — {platform_name}",
             hook=f"Stop buying {niche} products that don't work. I found THE one.",
@@ -336,7 +442,27 @@ class ScriptAgent:
             raw="[DRY RUN] Mock script — no API call made.",
         )
 
-    def _mock_captions(self, product: str) -> CaptionOutput:
+    def _mock_captions(self, product: str, language: str = "en") -> CaptionOutput:
+        is_pt = language.startswith("pt")
+
+        if is_pt:
+            return CaptionOutput(
+                primary=(
+                    f"🚨 Finalmente encontrei o {product} que funciona de verdade.\n\n"
+                    f"Depois de testar 5 opções diferentes, esse se destaca. "
+                    f"Olha o porquê 👇\n\n"
+                    f"Review completa no link da bio.\n\n"
+                    f"#publi #afiliado"
+                ),
+                alternatives=[
+                    f"Qual é o melhor {product} que você recomendaria? "
+                    f"O meu tá no link da bio. #afiliado",
+                    f"Gastei R$500 testando alternativas de {product} pra você não precisar. "
+                    f"O que eu aprendi... 🧵",
+                ],
+                raw="[DRY RUN] Legendas simuladas — sem chamada de API.",
+            )
+
         return CaptionOutput(
             primary=(
                 f"🚨 I finally found the {product} that actually works.\n\n"
@@ -354,7 +480,34 @@ class ScriptAgent:
             raw="[DRY RUN] Mock captions — no API call made.",
         )
 
-    def _mock_hashtags(self, topic: str, platform: str) -> HashtagOutput:
+    def _mock_hashtags(self, topic: str, platform: str, language: str = "en") -> HashtagOutput:
+        is_pt = language.startswith("pt")
+
+        if is_pt:
+            return HashtagOutput(
+                tags=[
+                    f"#{topic.replace(' ', '')}",
+                    "#Review",
+                    "#Tecnologia",
+                    "#ReviewProduto",
+                    "#CadeiraGamer",
+                    "#SetupGamer",
+                    "#DicaTech",
+                    "#Imperdivel",
+                    "#ReviewHonesta",
+                ],
+                grouped={
+                    "broad": ["#Tecnologia", "#Review", "#DicaTech"],
+                    "niche": [
+                        f"#{topic.replace(' ', '')}",
+                        "#SetupGamer",
+                        "#CadeiraGamer",
+                    ],
+                    "specific": ["#ReviewProduto", "#Imperdivel", "#ReviewHonesta"],
+                },
+                raw="[DRY RUN] Hashtags simuladas — sem chamada de API.",
+            )
+
         return HashtagOutput(
             tags=[
                 f"#{topic.replace(' ', '')}",
