@@ -1,0 +1,26 @@
+[project]
+name = "harpy-affiliate-marketing"
+version = "0.1.0"
+description = "End-to-end affiliate marketing automation — from research to published video with a single approval"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Harpy" }]
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.0.0",
+    "click>=8.1.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+harpy = "cli:main"
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cli"]

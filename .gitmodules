@@ -1,0 +1,3 @@
+[submodule "skills/affiliate-skills"]
+	path = skills/affiliate-skills
+	url = https://github.com/Affitor/affiliate-skills.git
