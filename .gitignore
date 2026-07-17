@@ -8,6 +8,7 @@ venv/
 .env
 *.log
 logs/
-outputs/flywheels/
+outputs/*
+!outputs/queue.json
 tailwind.css
 .opencode/
