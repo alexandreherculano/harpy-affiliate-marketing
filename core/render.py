@@ -50,6 +50,7 @@ class RenderAgent:
         output_dir: str | None = None,
         search_queries: list[str] | None = None,
         voice_language: str = "pt",
+        product_url: str = "",
     ) -> RenderResult:
         """Render a complete video from a script.
 
@@ -68,20 +69,45 @@ class RenderAgent:
 
         logger.info("RenderAgent starting — niche=%s product=%s", niche, product_name)
 
-        # 1. Fetch stock clips
+        # 1. Fetch media (priority: product images > generated visuals > Pexels > fallback)
         clip_paths: list[Path] = []
-        for query in queries:
-            try:
-                search = self.stock.search_videos(query, per_page=3)
-                if search.clips:
-                    paths = self.stock.download_all(
-                        search, output_dir=str(output / "clips"), limit=2
-                    )
-                    clip_paths.extend(paths)
-            except Exception as e:
-                msg = f"Stock fetch failed for '{query}': {e}"
-                logger.warning(msg)
-                errors.append(msg)
+        clips_output = str(output / "clips")
+
+        if product_url:
+            search = self.stock.fetch_product_media(
+                product_url=product_url,
+                product_name=product_name,
+                niche=niche,
+                output_dir=clips_output,
+                count=3,
+            )
+        elif niche or product_name:
+            search = self.stock.fetch_product_media(
+                product_name=product_name,
+                niche=niche,
+                output_dir=clips_output,
+                count=3,
+            )
+        else:
+            search = StockSearchResult(query="default", clips=[], provider="fallback")
+
+        if search.clips:
+            paths = self.stock.download_all(search, output_dir=clips_output, limit=3)
+            clip_paths.extend(paths)
+
+        if not clip_paths:
+            queries = search_queries or self._derive_queries(niche, product_name)
+            for query in queries:
+                try:
+                    fallback_search = self.stock.search_videos(query, per_page=2)
+                    if fallback_search.clips:
+                        paths = self.stock.download_all(fallback_search, output_dir=clips_output, limit=1)
+                        clip_paths.extend(paths)
+                except Exception as e:
+                    msg = f"Media fetch failed for '{query}': {e}"
+                    logger.warning(msg)
+                    errors.append(msg)
+
         result.clips_paths = clip_paths
 
         # 2. Generate voiceover
